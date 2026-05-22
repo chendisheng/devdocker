@@ -1,0 +1,780 @@
+version: "3.9"
+
+# ╔══════════════════════════════════════════════════════════════╗
+#  本地开发环境 · Local Dev Stack
+#  ✅ 已启用  → 直接运行的服务
+#  💤 注释中  → 取消注释即可启用；记得同步打开底部 volumes 块
+#
+#  快速启动:      docker compose up -d
+#  停止保留数据:  docker compose down
+#  停止并删数据:  docker compose down -v
+# ╚══════════════════════════════════════════════════════════════╝
+
+networks:
+  dev_net:
+    driver: bridge
+
+# ── 持久化卷（启用对应服务时一并取消注释）────────────────────
+volumes:
+  mysql_data:
+  redis_data:
+  # kafka_data:
+  # postgres_data:
+  # mariadb_data:
+  # mongo_data:
+  # rabbitmq_data:
+  # zookeeper_data:
+  # es_data:
+  # kibana_data:
+  # meilisearch_data:
+  # minio_data:
+  # seaweedfs_data:
+  # prometheus_data:
+  # grafana_data:
+  # jaeger_data:
+  # zipkin_data:
+  # keycloak_data:
+  # vault_data:
+  # consul_data:
+  # localstack_data:
+  # wiremock_data:
+
+# ══════════════════════════════════════════════════════════════
+services:
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 1  数据库
+# └──────────────────────────────────────────────────────────┘
+
+  # ── ✅ MySQL 8 ─────────────────────────────────────────────
+  mysql:
+    image: mysql:9.6.0
+    container_name: local_mysql
+    restart: unless-stopped
+    networks:
+      - dev_net
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: dev_db
+      MYSQL_USER: dev
+      MYSQL_PASSWORD: dev123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      #- ./docker/mysql/init:/docker-entrypoint-initdb.d    # 初始化 SQL（可选）
+      #- ./docker/mysql/conf.d:/etc/mysql/conf.d            # 自定义配置（可选）
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── ✅ Redis 7 ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: local_redis
+    restart: unless-stopped
+    networks:
+      - dev_net
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --requirepass redis123
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis123", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 💤 PostgreSQL 16 ───────────────────────────────────────
+  # 关系型；JSON 支持更强，适合复杂查询场景
+  # volumes: postgres_data
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: local_postgres
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_USER: dev
+  #     POSTGRES_PASSWORD: dev123
+  #     POSTGRES_DB: dev_db
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./docker/postgres/init:/docker-entrypoint-initdb.d
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U dev"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ── 💤 MariaDB 11 ──────────────────────────────────────────
+  # MySQL 社区分支，协议兼容，性能略优；与 MySQL 二选一
+  # volumes: mariadb_data
+  # mariadb:
+  #   image: mariadb:11
+  #   container_name: local_mariadb
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "3307:3306"              # 避免与 MySQL 3306 冲突
+  #   environment:
+  #     MARIADB_ROOT_PASSWORD: root123
+  #     MARIADB_DATABASE: dev_db
+  #     MARIADB_USER: dev
+  #     MARIADB_PASSWORD: dev123
+  #   volumes:
+  #     - mariadb_data:/var/lib/mysql
+  #   healthcheck:
+  #     test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ── 💤 MongoDB 7 ───────────────────────────────────────────
+  # 文档型 NoSQL，灵活 Schema，适合快速迭代
+  # volumes: mongo_data
+  # mongo:
+  #   image: mongo:7
+  #   container_name: local_mongo
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "27017:27017"
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: root
+  #     MONGO_INITDB_ROOT_PASSWORD: root123
+  #     MONGO_INITDB_DATABASE: dev_db
+  #   volumes:
+  #     - mongo_data:/data/db
+  #     - ./docker/mongo/init:/docker-entrypoint-initdb.d
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 2  消息队列 / 事件流
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 RabbitMQ 3（含 Management UI）─────────────────────
+  # 传统任务队列、延迟任务首选
+  # Web UI: http://localhost:15672  账号: admin/admin123
+  # volumes: rabbitmq_data
+  # rabbitmq:
+  #   image: rabbitmq:3-management-alpine
+  #   container_name: local_rabbitmq
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "5672:5672"       # AMQP
+  #     - "15672:15672"     # Management UI
+  #   environment:
+  #     RABBITMQ_DEFAULT_USER: admin
+  #     RABBITMQ_DEFAULT_PASS: admin123
+  #     RABBITMQ_DEFAULT_VHOST: /
+  #   volumes:
+  #     - rabbitmq_data:/var/lib/rabbitmq
+  #   healthcheck:
+  #     test: ["CMD", "rabbitmq-diagnostics", "ping"]
+  #     interval: 15s
+  #     timeout: 10s
+  #     retries: 5
+
+  # ── 💤 Kafka（KRaft 模式，无需 Zookeeper）─────────────────
+  # 高吞吐事件流；KRaft 模式本地更轻量
+  # volumes: kafka_data
+  # kafka:
+  #   image: confluentinc/cp-kafka:7.6.1
+  #   container_name: local_kafka
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9092:9092"
+  #   environment:
+  #     KAFKA_NODE_ID: 1
+  #     KAFKA_PROCESS_ROLES: broker,controller
+  #     KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+  #     KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+  #     KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  #     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+  #     KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+  #     KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  #     CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+  #   volumes:
+  #     - kafka_data:/var/lib/kafka/data
+
+  # ── 💤 Zookeeper（仅旧版 Kafka 需要）─────────────────────
+  # 使用上方 KRaft 模式 Kafka 时无需此服务
+  # volumes: zookeeper_data
+  # zookeeper:
+  #   image: confluentinc/cp-zookeeper:7.6.1
+  #   container_name: local_zookeeper
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "2181:2181"
+  #   environment:
+  #     ZOOKEEPER_CLIENT_PORT: 2181
+  #     ZOOKEEPER_TICK_TIME: 2000
+  #   volumes:
+  #     - zookeeper_data:/var/lib/zookeeper
+
+  # ── 💤 Kafka UI（Kafka 管理客户端）──────────────────────────
+  # Web UI: http://localhost:8080
+  # kafka-ui:
+  #   image: provectuslabs/kafka-ui:latest
+  #   container_name: local_kafka_ui
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     KAFKA_CLUSTERS_0_NAME: local
+  #     KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+  #   depends_on:
+  #     - kafka
+
+  # ── 💤 NATS 2 ──────────────────────────────────────────────
+  # 轻量高性能消息系统，支持 Pub/Sub、Request/Reply、JetStream
+  # nats:
+  #   image: nats:2-alpine
+  #   container_name: local_nats
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4222:4222"     # 客户端
+  #     - "8222:8222"     # HTTP 监控
+  #   command: ["--jetstream", "--http_port", "8222"]
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 3  对象存储 / 文件存储
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 MinIO（S3 兼容对象存储）───────────────────────────
+  # 完全兼容 AWS S3 API，本地开发替代品
+  # Web Console: http://localhost:9001  账号: minioadmin/minioadmin123
+  # volumes: minio_data
+  # minio:
+  #   image: minio/minio:latest
+  #   container_name: local_minio
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9000:9000"     # S3 API
+  #     - "9001:9001"     # Web Console
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin123
+  #   volumes:
+  #     - minio_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "mc", "ready", "local"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # ── 💤 SeaweedFS ───────────────────────────────────────────
+  # 分布式文件存储，兼容 S3 API，适合大文件场景
+  # volumes: seaweedfs_data
+  # seaweedfs:
+  #   image: chrislusf/seaweedfs:latest
+  #   container_name: local_seaweedfs
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9333:9333"     # Master
+  #     - "8080:8080"     # Volume
+  #     - "18888:18888"   # Filer
+  #   command: server -s3 -dir=/data
+  #   volumes:
+  #     - seaweedfs_data:/data
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 4  搜索引擎
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 Elasticsearch 8 ────────────────────────────────────
+  # 全文检索 + 数据分析；建议限制 JVM 堆内存避免 OOM
+  # volumes: es_data
+  # elasticsearch:
+  #   image: elasticsearch:8.13.4
+  #   container_name: local_es
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9200:9200"     # HTTP API
+  #     - "9300:9300"     # 集群通信（单节点可省略）
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #     - ES_JAVA_OPTS=-Xms512m -Xmx512m
+  #   volumes:
+  #     - es_data:/usr/share/elasticsearch/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 10s
+  #     retries: 5
+
+  # ── 💤 Kibana（配合 Elasticsearch 使用）──────────────────
+  # 日志 / 数据可视化；需先启用 elasticsearch
+  # Web UI: http://localhost:5601
+  # volumes: kibana_data
+  # kibana:
+  #   image: kibana:8.13.4
+  #   container_name: local_kibana
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "5601:5601"
+  #   environment:
+  #     ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+  #   volumes:
+  #     - kibana_data:/usr/share/kibana/data
+  #   depends_on:
+  #     elasticsearch:
+  #       condition: service_healthy
+
+  # ── 💤 Meilisearch ─────────────────────────────────────────
+  # 轻量全文搜索，启动快、资源少，适合普通搜索场景
+  # Web UI: http://localhost:7700
+  # volumes: meilisearch_data
+  # meilisearch:
+  #   image: getmeili/meilisearch:latest
+  #   container_name: local_meilisearch
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "7700:7700"
+  #   environment:
+  #     MEILI_MASTER_KEY: meili_dev_key
+  #     MEILI_ENV: development
+  #   volumes:
+  #     - meilisearch_data:/meili_data
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 5  监控 & 可观测性
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 Prometheus ──────────────────────────────────────────
+  # 指标采集与存储；配合 Grafana 使用效果最佳
+  # Web UI: http://localhost:9090
+  # 需提供 ./docker/prometheus/prometheus.yml 配置文件
+  # volumes: prometheus_data
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: local_prometheus
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9090:9090"
+  #   command:
+  #     - "--config.file=/etc/prometheus/prometheus.yml"
+  #     - "--storage.tsdb.path=/prometheus"
+  #     - "--storage.tsdb.retention.time=15d"
+  #   volumes:
+  #     - prometheus_data:/prometheus
+  #     - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  # ── 💤 Grafana ─────────────────────────────────────────────
+  # 可视化仪表盘，支持 Prometheus / Loki / ES 等数据源
+  # Web UI: http://localhost:3000  账号: admin/admin123
+  # volumes: grafana_data
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: local_grafana
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: admin123
+  #     GF_USERS_ALLOW_SIGN_UP: "false"
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+
+  # ── 💤 Jaeger（分布式链路追踪）───────────────────────────
+  # all-in-one 镜像包含收集器 + 查询 + UI
+  # Web UI: http://localhost:16686  OTLP gRPC: 4317  OTLP HTTP: 4318
+  # volumes: jaeger_data
+  # jaeger:
+  #   image: jaegertracing/all-in-one:latest
+  #   container_name: local_jaeger
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "6831:6831/udp"   # Thrift Compact
+  #     - "16686:16686"     # Query UI
+  #     - "4317:4317"       # OTLP gRPC
+  #     - "4318:4318"       # OTLP HTTP
+  #   environment:
+  #     COLLECTOR_OTLP_ENABLED: "true"
+  #   volumes:
+  #     - jaeger_data:/tmp
+
+  # ── 💤 Zipkin（轻量链路追踪，与 Jaeger 二选一）──────────
+  # Web UI: http://localhost:9411
+  # volumes: zipkin_data
+  # zipkin:
+  #   image: openzipkin/zipkin:latest
+  #   container_name: local_zipkin
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9411:9411"
+  #   volumes:
+  #     - zipkin_data:/zipkin
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 6  网关 & 代理
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 Nginx ───────────────────────────────────────────────
+  # 反向代理 / 静态文件 / SSL 终止
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: local_nginx
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+  #     - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+
+  # ── 💤 Traefik v3 ─────────────────────────────────────────
+  # 自动感知 Docker 容器，免手动配置路由
+  # Dashboard: http://localhost:8080
+  # traefik:
+  #   image: traefik:v3.0
+  #   container_name: local_traefik
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "80:80"
+  #     - "8080:8080"     # Dashboard（仅开发模式）
+  #   command:
+  #     - "--api.insecure=true"
+  #     - "--providers.docker=true"
+  #     - "--providers.docker.exposedbydefault=false"
+  #     - "--entrypoints.web.address=:80"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # ── 💤 Kong Gateway 3 ──────────────────────────────────────
+  # 企业级 API 网关；含限流、认证、日志等插件
+  # Proxy: http://localhost:8000  Admin API: http://localhost:8001
+  # kong:
+  #   image: kong:3-alpine
+  #   container_name: local_kong
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8000:8000"     # Proxy HTTP
+  #     - "8443:8443"     # Proxy HTTPS
+  #     - "8001:8001"     # Admin API
+  #   environment:
+  #     KONG_DATABASE: "off"                         # DB-less 模式
+  #     KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+  #     KONG_PROXY_ACCESS_LOG: /dev/stdout
+  #     KONG_ADMIN_ACCESS_LOG: /dev/stdout
+  #     KONG_PROXY_ERROR_LOG: /dev/stderr
+  #     KONG_ADMIN_ERROR_LOG: /dev/stderr
+  #     KONG_ADMIN_LISTEN: 0.0.0.0:8001
+  #   volumes:
+  #     - ./docker/kong/kong.yml:/kong/kong.yml:ro
+
+  # ── 💤 Envoy Proxy ─────────────────────────────────────────
+  # 高性能 L7 代理，常用于服务网格 sidecar
+  # Admin: http://localhost:9901
+  # envoy:
+  #   image: envoyproxy/envoy:v1.29-latest
+  #   container_name: local_envoy
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "10000:10000"   # Proxy
+  #     - "9901:9901"     # Admin
+  #   command: ["/usr/local/bin/envoy", "-c", "/etc/envoy/envoy.yaml"]
+  #   volumes:
+  #     - ./docker/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 7  开发工具 & 辅助服务
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 MailHog（本地邮件调试）────────────────────────────
+  # 拦截所有发出的邮件，无需真实邮箱
+  # SMTP: localhost:1025  Web UI: http://localhost:8025
+  # mailhog:
+  #   image: mailhog/mailhog:latest
+  #   container_name: local_mailhog
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "1025:1025"     # SMTP
+  #     - "8025:8025"     # Web UI
+
+  # ── 💤 phpMyAdmin（MySQL Web 管理界面）────────────────────
+  # 依赖 mysql 服务；Web UI: http://localhost:8088
+  # phpmyadmin:
+  #   image: phpmyadmin:latest
+  #   container_name: local_phpmyadmin
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8088:80"
+  #   environment:
+  #     PMA_HOST: mysql
+  #     PMA_PORT: 3306
+  #     PMA_USER: root
+  #     PMA_PASSWORD: root123
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+
+  # ── 💤 RedisInsight（Redis Web 管理界面）─────────────────
+  # Web UI: http://localhost:8001
+  # redisinsight:
+  #   image: redis/redisinsight:latest
+  #   container_name: local_redisinsight
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8001:5540"
+  #   depends_on:
+  #     - redis
+
+  # ── 💤 Keycloak 24（OAuth2 / OIDC 身份认证）─────────────
+  # 本地模拟 SSO / 单点登录
+  # Admin Console: http://localhost:8180  账号: admin/admin123
+  # volumes: keycloak_data
+  # keycloak:
+  #   image: quay.io/keycloak/keycloak:24.0
+  #   container_name: local_keycloak
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8180:8080"
+  #   command: start-dev
+  #   environment:
+  #     KEYCLOAK_ADMIN: admin
+  #     KEYCLOAK_ADMIN_PASSWORD: admin123
+  #     KC_DB: dev-file          # 开发用文件 DB；生产环境换 postgres
+  #   volumes:
+  #     - keycloak_data:/opt/keycloak/data
+
+  # ── 💤 Vault（密钥 & 秘密管理）──────────────────────────
+  # 管理 API Key、证书、数据库密码等敏感信息
+  # Web UI: http://localhost:8200  Root Token: dev-root-token
+  # volumes: vault_data
+  # vault:
+  #   image: hashicorp/vault:latest
+  #   container_name: local_vault
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8200:8200"
+  #   cap_add:
+  #     - IPC_LOCK
+  #   command: server -dev
+  #   environment:
+  #     VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+  #     VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+  #   volumes:
+  #     - vault_data:/vault/data
+
+  # ── 💤 Consul（服务注册与发现 / 配置中心）───────────────
+  # Web UI: http://localhost:8500
+  # volumes: consul_data
+  # consul:
+  #   image: hashicorp/consul:latest
+  #   container_name: local_consul
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8500:8500"     # HTTP API + Web UI
+  #     - "8600:8600/udp" # DNS
+  #   command: agent -dev -ui -client=0.0.0.0
+  #   volumes:
+  #     - consul_data:/consul/data
+
+  # ── 💤 LocalStack（模拟 AWS 云服务）─────────────────────
+  # 支持 S3、SQS、SNS、Lambda、DynamoDB、SecretsManager 等
+  # Endpoint: http://localhost:4566
+  # volumes: localstack_data
+  # localstack:
+  #   image: localstack/localstack:latest
+  #   container_name: local_localstack
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4566:4566"     # 统一 Edge 入口（所有 AWS 服务走同一端口）
+  #   environment:
+  #     SERVICES: s3,sqs,sns,lambda,dynamodb,secretsmanager
+  #     DEFAULT_REGION: ap-southeast-1
+  #     LOCALSTACK_AUTH_TOKEN: ""    # 免费版留空；Pro 版填入 token
+  #   volumes:
+  #     - localstack_data:/var/lib/localstack
+  #     - /var/run/docker.sock:/var/run/docker.sock
+
+  # ── 💤 WireMock（API Mock / Stub）────────────────────────
+  # 隔离第三方依赖，测试时返回预设响应
+  # Admin UI: http://localhost:9090/__admin
+  # volumes: wiremock_data
+  # wiremock:
+  #   image: wiremock/wiremock:latest
+  #   container_name: local_wiremock
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "9090:8080"
+  #   command: --verbose
+  #   volumes:
+  #     - ./docker/wiremock/mappings:/home/wiremock/mappings   # stub 定义
+  #     - ./docker/wiremock/__files:/home/wiremock/__files     # 响应文件
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 8  代码分析 MCP (Go · Java · Lua)
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 Semgrep MCP ─────────────────────────────────────────
+  # 静态分析 MCP，支持 Go/Java/Lua 等 30+ 语言，5000+ 内置规则
+  # 覆盖: 安全漏洞扫描 / 代码质量 / AST 输出 / 自定义规则
+  # MCP Endpoint: http://localhost:8001/mcp
+  # 客户端配置: { "type": "streamable-http", "url": "http://localhost:8001/mcp" }
+  # semgrep-mcp:
+  #   image: ghcr.io/semgrep/mcp:latest
+  #   container_name: local_semgrep_mcp
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8001:8000"      # MCP HTTP 端口
+  #   # 可选: 接入 Semgrep AppSec Platform 查看历史扫描结果
+  #   # environment:
+  #   #   SEMGREP_APP_TOKEN: "your_token_here"
+
+  # ── 💤 mcp-language-server (Go · Java · Lua LSP 桥接) ─────
+  # 把 LSP 协议桥接为 MCP，提供语义级代码导航
+  # 需要自建镜像，Dockerfile 示例见 docker/lsp/Dockerfile
+  # 工具能力: go-to-definition / find-references / rename / diagnostics
+  # 每种语言单独起一个容器，挂载对应的项目目录
+  #
+  # — Go 项目 (依赖 gopls) —
+  # mcp-lsp-go:
+  #   build: ./docker/lsp/go          # 内含 gopls + mcp-language-server
+  #   container_name: local_mcp_lsp_go
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4389:4389"                  # MCP TCP 端口
+  #   volumes:
+  #     - /path/to/your/go/project:/workspace:ro
+  #   environment:
+  #     WORKSPACE: /workspace
+  #
+  # — Java 项目 (依赖 eclipse.jdt.ls) —
+  # mcp-lsp-java:
+  #   build: ./docker/lsp/java         # 内含 jdtls + mcp-language-server
+  #   container_name: local_mcp_lsp_java
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4390:4389"
+  #   volumes:
+  #     - /path/to/your/java/project:/workspace:ro
+  #   environment:
+  #     WORKSPACE: /workspace
+  #
+  # — Lua 项目 (依赖 lua-language-server) —
+  # mcp-lsp-lua:
+  #   build: ./docker/lsp/lua          # 内含 lua-language-server + mcp-language-server
+  #   container_name: local_mcp_lsp_lua
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4391:4389"
+  #   volumes:
+  #     - /path/to/your/lua/project:/workspace:ro
+  #   environment:
+  #     WORKSPACE: /workspace
+
+  # ── 💤 CodeBadger / Joern MCP (Go · Java 深度漏洞分析) ────
+  # 基于 Joern Code Property Graph 技术，做数据流/污点/可达性分析
+  # 适合: 安全审计 / 深度漏洞挖掘 (Go · Java · C/C++ 等，不支持 Lua)
+  # 资源需求较高: 建议预留 4GB+ 内存给 Joern JVM
+  # MCP Endpoint: http://localhost:4242/mcp
+  # codebadger:
+  #   image: ghcr.io/lekssays/codebadger:latest   # 或 git clone 后本地 build
+  #   container_name: local_codebadger
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4242:4242"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock   # Joern 在容器内启动子容器
+  #     - /path/to/your/project:/workspace
+  #   environment:
+  #     MCP_HOST: 0.0.0.0
+  #     MCP_PORT: 4242
+  #     JOERN_JAVA_OPTS: "-Xmx4G -Xms2G -XX:+UseG1GC"
+  #     CPG_GENERATION_TIMEOUT: 600
+  #   depends_on:
+  #     - redis    # CodeBadger 使用 Redis 缓存 CPG 结果
