@@ -668,3 +668,97 @@ services:
   #   volumes:
   #     - ./docker/wiremock/mappings:/home/wiremock/mappings   # stub 定义
   #     - ./docker/wiremock/__files:/home/wiremock/__files     # 响应文件
+
+
+# ┌──────────────────────────────────────────────────────────┐
+#  § 8  代码分析 MCP (Go · Java · Lua)
+# └──────────────────────────────────────────────────────────┘
+
+  # ── 💤 Semgrep MCP ─────────────────────────────────────────
+  # 静态分析 MCP，支持 Go/Java/Lua 等 30+ 语言，5000+ 内置规则
+  # 覆盖: 安全漏洞扫描 / 代码质量 / AST 输出 / 自定义规则
+  # MCP Endpoint: http://localhost:8001/mcp
+  # 客户端配置: { "type": "streamable-http", "url": "http://localhost:8001/mcp" }
+  # semgrep-mcp:
+  #   image: ghcr.io/semgrep/mcp:latest
+  #   container_name: local_semgrep_mcp
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "8001:8000"      # MCP HTTP 端口
+  #   # 可选: 接入 Semgrep AppSec Platform 查看历史扫描结果
+  #   # environment:
+  #   #   SEMGREP_APP_TOKEN: "your_token_here"
+
+  # ── 💤 mcp-language-server (Go · Java · Lua LSP 桥接) ─────
+  # 把 LSP 协议桥接为 MCP，提供语义级代码导航
+  # 需要自建镜像，Dockerfile 示例见 docker/lsp/Dockerfile
+  # 工具能力: go-to-definition / find-references / rename / diagnostics
+  # 每种语言单独起一个容器，挂载对应的项目目录
+  #
+  # — Go 项目 (依赖 gopls) —
+  # mcp-lsp-go:
+  #   build: ./docker/lsp/go          # 内含 gopls + mcp-language-server
+  #   container_name: local_mcp_lsp_go
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4389:4389"                  # MCP TCP 端口
+  #   volumes:
+  #     - /path/to/your/go/project:/workspace:ro
+  #   environment:
+  #     WORKSPACE: /workspace
+  #
+  # — Java 项目 (依赖 eclipse.jdt.ls) —
+  # mcp-lsp-java:
+  #   build: ./docker/lsp/java         # 内含 jdtls + mcp-language-server
+  #   container_name: local_mcp_lsp_java
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4390:4389"
+  #   volumes:
+  #     - /path/to/your/java/project:/workspace:ro
+  #   environment:
+  #     WORKSPACE: /workspace
+  #
+  # — Lua 项目 (依赖 lua-language-server) —
+  # mcp-lsp-lua:
+  #   build: ./docker/lsp/lua          # 内含 lua-language-server + mcp-language-server
+  #   container_name: local_mcp_lsp_lua
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4391:4389"
+  #   volumes:
+  #     - /path/to/your/lua/project:/workspace:ro
+  #   environment:
+  #     WORKSPACE: /workspace
+
+  # ── 💤 CodeBadger / Joern MCP (Go · Java 深度漏洞分析) ────
+  # 基于 Joern Code Property Graph 技术，做数据流/污点/可达性分析
+  # 适合: 安全审计 / 深度漏洞挖掘 (Go · Java · C/C++ 等，不支持 Lua)
+  # 资源需求较高: 建议预留 4GB+ 内存给 Joern JVM
+  # MCP Endpoint: http://localhost:4242/mcp
+  # codebadger:
+  #   image: ghcr.io/lekssays/codebadger:latest   # 或 git clone 后本地 build
+  #   container_name: local_codebadger
+  #   restart: unless-stopped
+  #   networks:
+  #     - dev_net
+  #   ports:
+  #     - "4242:4242"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock   # Joern 在容器内启动子容器
+  #     - /path/to/your/project:/workspace
+  #   environment:
+  #     MCP_HOST: 0.0.0.0
+  #     MCP_PORT: 4242
+  #     JOERN_JAVA_OPTS: "-Xmx4G -Xms2G -XX:+UseG1GC"
+  #     CPG_GENERATION_TIMEOUT: 600
+  #   depends_on:
+  #     - redis    # CodeBadger 使用 Redis 缓存 CPG 结果

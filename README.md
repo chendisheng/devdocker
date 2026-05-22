@@ -10,6 +10,7 @@
 - **项目初始化模板**：新项目可以直接复制 `docker-compose/docker-compose.yaml` 使用。
 - **技术选型验证**：按需开启 PostgreSQL、MongoDB、RabbitMQ、Kafka、MinIO、Elasticsearch 等服务。
 - **第三方依赖模拟**：使用 LocalStack、WireMock、MailHog 等服务模拟云服务、外部 API 和邮件发送。
+- **代码分析 MCP**：为 AI 编程助手提供 Semgrep、LSP、Joern 等代码分析能力。
 
 ## 快速开始
 
@@ -121,6 +122,44 @@ docker compose logs -f
 | LocalStack | `4566` | 本地模拟 AWS 服务 |
 | WireMock | `9090` | API Mock / Stub |
 
+### 代码分析 MCP
+
+| 服务 | 默认端口 | 用途 |
+| --- | --- | --- |
+| Semgrep MCP | `8001` | 静态代码分析，支持安全漏洞扫描、代码质量检查、AST 输出和自定义规则 |
+| mcp-language-server Go | `4389` | 通过 `gopls` 提供 Go 项目的语义级代码导航 |
+| mcp-language-server Java | `4390` | 通过 `eclipse.jdt.ls` 提供 Java 项目的语义级代码导航 |
+| mcp-language-server Lua | `4391` | 通过 `lua-language-server` 提供 Lua 项目的语义级代码导航 |
+| CodeBadger / Joern MCP | `4242` | 基于 Code Property Graph 的深度漏洞分析，适合 Go、Java、C/C++ 等项目 |
+
+MCP 服务适合配合支持 MCP 的 AI 编程客户端使用。当前模板中所有 MCP 服务默认注释，需要按需取消注释并替换项目挂载路径。
+
+Semgrep MCP 客户端配置示例：
+
+```json
+{
+  "type": "streamable-http",
+  "url": "http://localhost:8001/mcp"
+}
+```
+
+CodeBadger / Joern MCP Endpoint：
+
+```text
+http://localhost:4242/mcp
+```
+
+LSP MCP 模板需要自建镜像，并把真实项目路径挂载到容器内：
+
+```yaml
+volumes:
+  - /path/to/your/go/project:/workspace:ro
+environment:
+  WORKSPACE: /workspace
+```
+
+CodeBadger 依赖 Redis 缓存 CPG 结果，启用时请保持 `redis` 服务可用。Joern JVM 资源消耗较高，建议为 Docker 预留 4GB 以上内存。
+
 ## 如何按项目复用
 
 推荐在新项目中复制整个 `docker-compose` 目录，作为项目本地开发环境的一部分：
@@ -143,6 +182,7 @@ your-project/
 - **避免端口冲突**：如果本机已经运行同类服务，修改左侧宿主机端口，例如 `"3307:3306"`。
 - **不要用于生产环境**：当前账号、密码和配置都面向本地开发，不适合直接部署生产。
 - **按项目维护配置**：如果某个业务项目有特殊初始化 SQL、网关配置或 Mock 数据，建议放在项目自己的 `docker/` 目录中。
+- **替换项目挂载路径**：MCP、Mock、存储等服务中的 `/path/to/your/project` 需要替换成真实项目路径。
 
 ## 常用连接信息
 
