@@ -74,6 +74,9 @@ services:
     image: apache/kafka:latest
     container_name: kafka
 
+    networks:
+      - dev_net
+
     ports:
       - "9092:9092"
 
@@ -96,7 +99,7 @@ services:
       # =========================
       # ⭐关键：对外访问地址（宿主机 / 内网机器用）
       # =========================
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.31.199:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.1.3:9092
 
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
 
