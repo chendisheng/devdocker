@@ -16,6 +16,7 @@ networks:
 volumes:
   mysql_data:
   redis_data:
+  redis_cluster_data:
   kafka_data:
 
 # ══════════════════════════════════════════════════════════════
@@ -68,6 +69,72 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── 🧩 Redis Cluster 3 节点（本地模拟服务器 Redis 集群）────────────
+  # 启动方式:
+  #   docker compose --profile redis-cluster up -d redis-cluster
+  #
+  # 给宿主机上的 Go 服务使用:
+  #   cluster_addrs: ["127.0.0.1:7100", "127.0.0.1:7101", "127.0.0.1:7102"]
+  #
+  # 注意: 这是单容器多 Redis 进程，专门用于本机调试 Redis Cluster 路由、
+  # MOVED 重定向和 PubSub/stream 在集群模式下的行为。
+  redis-cluster:
+    image: redis:7-alpine
+    container_name: local_redis_cluster
+    restart: unless-stopped
+    profiles:
+      - redis-cluster
+    networks:
+      - dev_net
+    ports:
+      - "7100:7100"
+      - "7101:7101"
+      - "7102:7102"
+      - "17100:17100"
+      - "17101:17101"
+      - "17102:17102"
+    command: |
+      sh -c '
+        set -eu
+
+        for port in 7100 7101 7102; do
+          mkdir -p /data/$${port}
+          printf "%s\n" \
+            "port $${port}" \
+            "bind 0.0.0.0" \
+            "protected-mode no" \
+            "appendonly yes" \
+            "dir /data/$${port}" \
+            "cluster-enabled yes" \
+            "cluster-config-file nodes.conf" \
+            "cluster-node-timeout 5000" \
+            "cluster-announce-ip 127.0.0.1" \
+            "cluster-announce-port $${port}" \
+            "cluster-announce-bus-port 1$${port}" \
+            > /data/$${port}/redis.conf
+          redis-server /data/$${port}/redis.conf &
+        done
+
+        sleep 3
+        if ! redis-cli -p 7100 cluster info 2>/dev/null | grep -q "cluster_state:ok"; then
+          yes yes | redis-cli --cluster create \
+            127.0.0.1:7100 \
+            127.0.0.1:7101 \
+            127.0.0.1:7102 \
+            --cluster-replicas 0
+        fi
+
+        wait
+      '
+    volumes:
+      - redis_cluster_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "7100", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   # ── ✅ Kafka（KRaft 模式，无需 Zookeeper）─────────────────
   # 高吞吐事件流；KRaft 模式本地更轻量
   kafka:
@@ -99,7 +166,7 @@ services:
       # =========================
       # ⭐关键：对外访问地址（宿主机 / 内网机器用）
       # =========================
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.1.3:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.1.33:9092
 
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
 
